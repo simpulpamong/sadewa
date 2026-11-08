@@ -1,0 +1,13 @@
+.git
+.github
+.vscode
+.idea
+.vercel
+.next
+node_modules
+coverage
+sadewaadmin
+.env*
+*.log
+*.tsbuildinfo
+README.md
