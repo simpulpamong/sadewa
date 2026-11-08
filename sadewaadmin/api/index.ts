@@ -1,4 +1,7 @@
-import handler from '../src/api/server';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const handler = require('../dist/server.cjs').default;
 
 export default handler;
 
