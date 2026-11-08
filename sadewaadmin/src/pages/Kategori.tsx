@@ -61,7 +61,7 @@ export default function Kategori() {
   const saveSub = async () => {
     if (!editSub?.name || !editSub?.categoryId) { dialog.toast('Nama & kategori sub wajib diisi.', 'warning'); return; }
     try {
-      const payload = { ...editSub, icon: '' };
+      const payload = { ...editSub };
       if (editSub.id) await api(`/api/admin/subcategories/${editSub.id}`, { method:'PUT', headers: authHeaders(token), body: JSON.stringify(payload) });
       else await api(`/api/admin/subcategories`, { method:'POST', headers: authHeaders(token), body: JSON.stringify(payload) });
       setEditSub(null); dialog.toast('Subkategori tersimpan.', 'success'); await load();
@@ -109,12 +109,15 @@ export default function Kategori() {
                 {children.length===0 && <div className="px-12 py-4 text-sm text-slate-500">Belum ada subkategori.</div>}
                 {children.map(sub => {
                   const subImg = resolveKategoriImage(sub.image);
+                  const SubIcon = resolveCategoryIcon(sub.icon);
                   return (
                   <div key={sub.id} className="px-6 sm:px-12 py-3 flex items-center gap-3">
-                    {subImg ? (
+                    {SubIcon ? (
+                      <span className="w-11 h-11 rounded-xl bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/30 items-center justify-center shrink-0 text-blue-600 dark:text-blue-400 flex" title={`Ikon ${sub.name}`}><SubIcon className="w-5 h-5" aria-hidden="true" /></span>
+                    ) : subImg ? (
                       <img src={subImg} alt={`Foto ${sub.name}`} className="w-11 h-11 rounded-xl object-cover border-2 border-blue-200 dark:border-blue-500/30 bg-slate-100 dark:bg-slate-800 shrink-0 shadow-sm" onError={(e)=>{ e.currentTarget.style.display='none'; (e.currentTarget.nextElementSibling as HTMLElement|null)?.style.removeProperty('display'); }} />
                     ) : null}
-                    <span className="w-11 h-11 rounded-xl bg-slate-100 dark:bg-slate-800 border border-dashed border-slate-300 dark:border-slate-700 items-center justify-center shrink-0 text-slate-400" style={{ display: subImg ? 'none' : 'flex' }} title="Belum ada foto subkategori" aria-hidden="true"><ImageIcon className="w-4 h-4"/></span>
+                    {!SubIcon && <span className="w-11 h-11 rounded-xl bg-slate-100 dark:bg-slate-800 border border-dashed border-slate-300 dark:border-slate-700 items-center justify-center shrink-0 text-slate-400" style={{ display: subImg ? 'none' : 'flex' }} title="Belum ada ikon atau foto subkategori" aria-hidden="true"><ImageIcon className="w-4 h-4"/></span>}
                     <div className="flex-1 min-w-0">
                       <div className="font-medium text-sm flex items-center gap-2">
                         {sub.name} {!sub.active && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">nonaktif</span>}
@@ -145,6 +148,7 @@ export default function Kategori() {
             <Inp label="Sheet Foto" value={editSub.config?.photoSheet||''} onChange={v=>setEditSub({...editSub,config:{...(editSub.config||{}),photoSheet:v}})} />
             <div className="sm:col-span-2"><Inp label="Sheet Narasi" value={editSub.config?.narrativeSheet||''} onChange={v=>setEditSub({...editSub,config:{...(editSub.config||{}),narrativeSheet:v}})} /></div>
           </div>
+          <IconPicker label="Ikon Subkategori" value={editSub.icon||''} onChange={v=>setEditSub({...editSub,icon:v})} />
           <div className="space-y-3">
             <ImagePicker label="Foto Subkategori (1–10)" value={editSub.image||''} onChange={v=>setEditSub({...editSub,image:v})} />
             {editSub.image ? (

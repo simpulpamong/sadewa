@@ -67,17 +67,17 @@ export function usePhotoProcessor() {
         patchPhoto(id, { procLabel: 'Membaca EXIF...' });
         const exif = await readExif(file);
 
-        let address: GeoAddress | null = null;
+        let addressPromise: Promise<GeoAddress | null> = Promise.resolve(null);
         let effectiveExif: ExifData | null = exif;
 
         if (exif?.gps) {
           patchPhoto(id, { procLabel: 'Mencari nama jalan...' });
-          address = await reverseGeocode(exif.gps.lat, exif.gps.lng);
+          addressPromise = reverseGeocode(exif.gps.lat, exif.gps.lng).catch(() => null);
         } else if (source === 'gallery' && settings.ocrGal) {
           patchPhoto(id, { procLabel: 'Mendeteksi lokasi (OCR)...' });
           const detected = await detectGalleryGps(file);
           if (detected) {
-            address = await reverseGeocode(detected.lat, detected.lng);
+            addressPromise = reverseGeocode(detected.lat, detected.lng).catch(() => null);
             effectiveExif = { gps: detected };
           }
         }
@@ -87,19 +87,20 @@ export function usePhotoProcessor() {
 
         // Berkas dikirim langsung sebagai Blob — tanpa perantara data URL
         // supaya tidak ada salinan base64 di memori.
-        const result = await processPhoto({
+        const [result, address] = await Promise.all([processPhoto({
           source: file,
           sourceKind: source,
           watermark,
           watermarkLogo: autoWatermarkLogo(category),
           context: buildContext({
             exif: effectiveExif,
-            address,
+            address: null,
             capturedAt: exif?.dto || exif?.dtd || exif?.dateTime || '',
             source,
           }),
+          addressPromise,
           maxBytes: MAX_PHOTO_KB * 1024,
-        });
+        }), addressPromise]);
 
         if (!result) throw new Error('Foto tidak dapat diproses.');
 

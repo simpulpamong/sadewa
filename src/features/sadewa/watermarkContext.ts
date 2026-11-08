@@ -22,7 +22,7 @@ export function useSadewaWatermarkContext(): BuildContext {
     const gps = lat !== null && lng !== null ? { lat, lng } : null;
 
     const context: WatermarkContext = {
-      program: category.slug === 'odnk' ? 'ODNK' : category.name,
+      program: category.parentCategory?.name || (category.slug === 'odnk' ? 'ODNK' : category.name),
       unit: '',
       fallbackAddress: composeManualAddress(location),
       gps,

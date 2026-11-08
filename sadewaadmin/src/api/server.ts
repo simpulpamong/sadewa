@@ -35,7 +35,6 @@ for (const p of [
 
 type Role = 'superadmin' | 'admin';
 interface Session { userId: string; username: string; role: Role; categoryScopes: string[]; exp: number }
-const sessions = new Map<string, Session>();
 const SESSION_TTL = 10 * 60 * 60 * 1000; // 10h
 
 // --- brute-force / login hardening (in-memory) ---
@@ -70,7 +69,6 @@ function safeStr(v: any, max: number) { return typeof v === 'string' ? v.trim().
 const LUCIDE_ICON_RE = /^[A-Z][A-Za-z0-9]{1,39}$/;
 setInterval(() => {
   const now = Date.now();
-  for (const [k, s] of sessions) if (!s || s.exp < now) sessions.delete(k);
   for (const [k, a] of loginAttempts) if (now - a.last > LOGIN_WINDOW_MS && a.lockUntil < now) loginAttempts.delete(k);
 }, 5 * 60 * 1000).unref?.();
 
@@ -137,9 +135,22 @@ async function createApp(): Promise<express.Express> {
 
   const auth = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
     const token = (req.headers.authorization || '').replace('Bearer ', '') || (req.headers['x-session'] as string) || '';
-    const s = token ? sessions.get(token) : null;
-    if (!s || s.exp < Date.now()) { if (token) sessions.delete(token); return res.status(401).json({ success: false, message: 'Sesi tidak valid / berakhir.' }); }
-    (req as any).session = s; next();
+    if (!token) return res.status(401).json({ success: false, message: 'Sesi tidak valid / berakhir.' });
+    try {
+      const ref = getDb().collection('admin_sessions').doc(token);
+      const snap = await ref.get();
+      const session = snap.exists ? snap.data() as Session : null;
+      if (!session || session.exp < Date.now()) {
+        if (snap.exists) await ref.delete().catch(() => {});
+        return res.status(401).json({ success: false, message: 'Sesi tidak valid / berakhir.' });
+      }
+      (req as any).session = session;
+      (req as any).sessionToken = token;
+      return next();
+    } catch (e: any) {
+      console.error('[auth/session] Firestore session check failed:', e?.message || e);
+      return res.status(503).json({ success: false, message: 'Layanan autentikasi tidak dapat mengakses Firestore.' });
+    }
   };
   const superOnly = (req: any, res: any, next: any) => req.session?.role === 'superadmin' ? next() : res.status(403).json({ success: false, message: 'Akses khusus superadmin.' });
 
@@ -166,7 +177,7 @@ async function createApp(): Promise<express.Express> {
       clearFail(key);
       const token = crypto.randomBytes(24).toString('hex');
       const session: Session = { userId: doc.id, username: u.username, role: (u.role === 'superadmin' ? 'superadmin' : 'admin'), categoryScopes: Array.isArray(u.categoryScopes) ? u.categoryScopes.filter((x: any) => typeof x === 'string') : [], exp: Date.now() + SESSION_TTL };
-      sessions.set(token, session);
+      await db.collection('admin_sessions').doc(token).set(session);
       res.json({ success: true, token, user: { id: doc.id, username: u.username, displayName: safeStr(u.displayName || u.username, 80), role: session.role, categoryScopes: session.categoryScopes, active: true } });
     } catch (e: any) {
       console.error('[auth/login] Firestore login check failed:', e?.message || e);
@@ -180,7 +191,15 @@ async function createApp(): Promise<express.Express> {
       res.json({ success: true, user: { ...req.session, displayName: u.displayName || req.session.username, active: u.active !== false } });
     } catch { res.json({ success: true, user: req.session }); }
   });
-  app.post('/api/auth/logout', auth, (req: any, res) => { sessions.delete((req.headers.authorization||'').replace('Bearer ','')); res.json({ success: true }); });
+  app.post('/api/auth/logout', auth, async (req: any, res) => {
+    try {
+      await getDb().collection('admin_sessions').doc(req.sessionToken).delete();
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error('[auth/logout] Firestore session delete failed:', e?.message || e);
+      res.status(503).json({ success: false, message: 'Sesi tidak dapat diakhiri karena Firestore tidak tersedia.' });
+    }
+  });
   app.post('/api/auth/change-password', auth, async (req: any, res) => {
     try {
       const { currentPassword, newPassword } = req.body || {};

@@ -46,6 +46,7 @@ export interface ProcessPhotoOptions {
   /** Logo watermark per kategori (Firestore/config): damkar.webp atau satpol.webp. */
   watermarkLogo?: 'damkar' | 'satpol' | string | null;
   context: WatermarkContext;
+  addressPromise?: Promise<GeoAddress | null>;
   /** Batas ukuran dalam byte. */
   maxBytes: number;
   /** Sisi terpanjang canvas. */
@@ -243,20 +244,24 @@ export function drawWatermark(args: DrawWatermarkArgs) {
   const padV = Math.round(pad * 0.5);
   const logoSize = Math.round(Math.min(width, height) * 0.095);
   const qrSize = qr ? Math.max(72, Math.min(190, Math.round(Math.min(width, height) * 0.13))) : 0;
-  const qrPad = qr ? Math.round(pad * 0.55) : 0;
+  const qrFrame = qr ? Math.max(3, Math.round(qrSize * 0.03)) : 0;
+  const qrGap = qr ? Math.max(3, Math.round(pad * 0.55)) : 0;
 
   const baseTitle = Math.max(11, Math.round(logoSize * 0.36));
   const fontBody = Math.max(9, Math.round(logoSize * 0.3));
   const fontSmall = Math.max(7, Math.round(fontBody * 0.72));
   const lineHeight = Math.round(fontBody * 1.5);
   const textX = bar + Math.round(pad * 0.4) + logoSize + Math.round(pad * 0.5);
-  const textWidth = Math.max(80, width - textX - pad - (qr ? qrSize + qrPad * 2 : 0));
+  const qrX = qr ? Math.round((width - qrSize) / 2) : 0;
+  const textWidth = Math.max(1, qr ? qrX - qrFrame - qrGap - textX : width - textX - pad);
+  const infoX = qr ? qrX + qrSize + qrFrame + qrGap : 0;
+  const infoWidth = qr ? Math.max(1, width - infoX - pad) : 0;
   const isDamkar = (context.watermarkLogo === 'damkar') || (Boolean(context.brand) && context.brand!.toLowerCase().includes('damkar'));
   const brand = context.brand || (isDamkar ? 'DAMKAR PONOROGO' : WATERMARK_BRAND);
   const title = `${brand} (${context.program})`;
   const fontTitle = Math.max(9, Math.min(baseTitle, Math.floor((textWidth / title.length) * 1.65)));
 
-  const address = context.address?.full || context.fallbackAddress;
+  const address = context.address?.parts.length ? context.address.full : context.fallbackAddress;
   const gps = context.gps || null;
   const time = source === 'camera' ? formatExifTime({ dto: context.capturedAt }) : `${nowStamp()} WIB`;
   const coords = gps
@@ -272,11 +277,13 @@ export function drawWatermark(args: DrawWatermarkArgs) {
 
   ctx.save();
   ctx.font = `${fontBody}px "Helvetica Neue", Arial, sans-serif`;
-  const addressLines = wrapText(ctx, address, textWidth, 3);
-  // Baris di bawah judul: program + nama petugas (opsional) + waktu + alamat + koordinat.
-  const contentHeight =
-    Math.round(fontTitle * 1.45) + (3 + addressLines.length + (person ? 1 : 0)) * lineHeight;
-  const qrFrame = qr ? Math.max(3, Math.round(qrSize * 0.03)) : 0;
+  const addressLines = wrapText(ctx, address, qr ? infoWidth : textWidth, 3);
+  const titleHeight = Math.round(fontTitle * 1.45);
+  const leftContentHeight = titleHeight + lineHeight * (1 + (person ? 1 : 0));
+  const rightContentHeight = qr ? (addressLines.length + 1) * lineHeight : 0;
+  const contentHeight = qr
+    ? Math.max(leftContentHeight, rightContentHeight)
+    : leftContentHeight + (addressLines.length + 1) * lineHeight;
   const qrBlockHeight = qr ? qrLabelFont + qrLabelGap + qrSize + padV * 2 + qrFrame * 2 : 0;
   const stripHeight = Math.max(
     Math.round(height * 0.085),
@@ -319,13 +326,13 @@ export function drawWatermark(args: DrawWatermarkArgs) {
 
   // QR lokasi
   if (qr && qrSize) {
-    const qx = width - qrSize - qrPad;
-    const qy = stripY + padV + qrLabelFont + qrLabelGap + qrFrame;
+    const qrBlockY = stripY + (stripHeight - qrBlockHeight) / 2 + padV;
+    const qy = qrBlockY + qrLabelFont + qrLabelGap + qrFrame;
     ctx.fillStyle = '#ffffff';
     const frame = qrFrame;
-    ctx.fillRect(qx - frame, qy - frame, qrSize + frame * 2, qrSize + frame * 2);
+    ctx.fillRect(qrX - frame, qy - frame, qrSize + frame * 2, qrSize + frame * 2);
     try {
-      ctx.drawImage(qr, qx, qy, qrSize, qrSize);
+      ctx.drawImage(qr, qrX, qy, qrSize, qrSize);
     } catch {
       /* abaikan */
     }
@@ -333,7 +340,7 @@ export function drawWatermark(args: DrawWatermarkArgs) {
     ctx.fillStyle = 'rgba(255,255,255,0.72)';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
-    ctx.fillText('LIHAT LOKASI', qx + qrSize / 2, stripY + padV);
+    ctx.fillText('LIHAT LOKASI', qrX + qrSize / 2, qrBlockY);
   }
 
   // Teks
@@ -341,7 +348,6 @@ export function drawWatermark(args: DrawWatermarkArgs) {
   ctx.textBaseline = 'top';
   let y = stripY + padV;
 
-  // Judul tetap "DAMKAR PONOROGO" untuk semua kategori.
   ctx.font = `800 ${fontTitle}px "Helvetica Neue", Arial, sans-serif`;
   ctx.fillStyle = 'rgba(255,206,74,0.95)';
   ctx.fillText(title, textX, y, textWidth);
@@ -357,17 +363,30 @@ export function drawWatermark(args: DrawWatermarkArgs) {
   ctx.fillText(time, textX, y, textWidth);
   y += lineHeight;
 
-  ctx.font = `500 ${fontBody}px "Helvetica Neue", Arial, sans-serif`;
   const verified = Boolean(context.address?.road);
-  ctx.fillStyle = verified ? 'rgba(167,243,208,0.94)' : 'rgba(196,242,214,0.86)';
-  for (const line of addressLines) {
-    ctx.fillText(line, textX, y, textWidth);
-    y += lineHeight;
+  const infoY = stripY + padV;
+  if (qr) {
+    let rightY = infoY;
+    ctx.font = `500 ${fontBody}px "Helvetica Neue", Arial, sans-serif`;
+    ctx.fillStyle = verified ? 'rgba(167,243,208,0.94)' : 'rgba(196,242,214,0.86)';
+    for (const line of addressLines) {
+      ctx.fillText(line, infoX, rightY, infoWidth);
+      rightY += lineHeight;
+    }
+    ctx.font = `400 ${fontSmall}px "Helvetica Neue", Arial, sans-serif`;
+    ctx.fillStyle = 'rgba(170,196,224,0.88)';
+    ctx.fillText(coords, infoX, rightY, infoWidth);
+  } else {
+    ctx.font = `500 ${fontBody}px "Helvetica Neue", Arial, sans-serif`;
+    ctx.fillStyle = verified ? 'rgba(167,243,208,0.94)' : 'rgba(196,242,214,0.86)';
+    for (const line of addressLines) {
+      ctx.fillText(line, textX, y, textWidth);
+      y += lineHeight;
+    }
+    ctx.font = `400 ${fontSmall}px "Helvetica Neue", Arial, sans-serif`;
+    ctx.fillStyle = 'rgba(170,196,224,0.88)';
+    ctx.fillText(coords, textX, y, textWidth);
   }
-
-  ctx.font = `400 ${fontSmall}px "Helvetica Neue", Arial, sans-serif`;
-  ctx.fillStyle = 'rgba(170,196,224,0.88)';
-  ctx.fillText(coords, textX, y, textWidth);
 
   // Wordmark SADEWA
   const brandSize = Math.max(7, Math.round(width * 0.018));
@@ -444,7 +463,8 @@ export async function processPhoto(options: ProcessPhotoOptions): Promise<Proces
       const qr = gps
         ? await makeQrCanvas(gps, Math.max(96, Math.min(260, Math.round(Math.min(width, height) * 0.16))))
         : null;
-      drawWatermark({ ctx, width, height, source: sourceKind, context, qr, logo: await getLogo(watermarkLogo) });
+      const address = options.addressPromise ? await options.addressPromise : context.address;
+      drawWatermark({ ctx, width, height, source: sourceKind, context: { ...context, address }, qr, logo: await getLogo(watermarkLogo) });
     }
 
     const { data, compressed } = compress(canvas, maxBytes, 'image/jpeg');

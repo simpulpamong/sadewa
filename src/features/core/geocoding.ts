@@ -29,6 +29,7 @@ const TTL_MS = 10 * 60 * 1000;
 const NOMINATIM_TIMEOUT_MS = 5_000;
 const OVERPASS_TIMEOUT_MS = 8_000;
 const REQUEST_INTERVAL_MS = 1_000;
+const GEOCODE_DEADLINE_MS = 9_000;
 const DETAIL_ZOOM = 18;
 
 const ROAD_RADIUS_M = 50;
@@ -61,7 +62,7 @@ interface OverpassResult {
   admin: Partial<Record<'province' | 'regency' | 'district' | 'village', string>>;
 }
 
-const cache = new Map<string, { at: number; value: GeoAddress }>();
+const cache = new Map<string, { at: number; value: GeoAddress; ttlMs: number }>();
 const inFlight = new Map<string, Promise<GeoAddress>>();
 let requestQueue: Promise<void> = Promise.resolve();
 let nextRequestAt = 0;
@@ -325,6 +326,14 @@ function buildFallback(lat: number, lng: number): GeoAddress {
   return { full: `${lat.toFixed(6)}, ${lng.toFixed(6)}, Indonesia`, road: '', parts: [] };
 }
 
+function withDeadline<T>(promise: Promise<T>, timeoutMs: number, fallback: () => T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    promise,
+    new Promise<T>(resolve => { timer = setTimeout(() => resolve(fallback()), timeoutMs); }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 /* ---------- alur utama ---------- */
 
 async function resolve(lat: number, lng: number): Promise<GeoAddress> {
@@ -349,15 +358,14 @@ export function reverseGeocode(lat: number, lng: number): Promise<GeoAddress> {
 
   const key = cacheKey(lat, lng);
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < TTL_MS) return Promise.resolve(hit.value);
+  if (hit && Date.now() - hit.at < hit.ttlMs) return Promise.resolve(hit.value);
 
   const pending = inFlight.get(key);
   if (pending) return pending;
 
-  const task = resolve(lat, lng)
+  const task = withDeadline(resolve(lat, lng), GEOCODE_DEADLINE_MS, () => buildFallback(lat, lng))
     .then(value => {
-      // Jangan cache hasil fallback koordinat agar bisa dicoba ulang.
-      if (value.parts.length > 0) cache.set(key, { at: Date.now(), value });
+      cache.set(key, { at: Date.now(), value, ttlMs: value.parts.length ? TTL_MS : 30_000 });
       return value;
     })
     .finally(() => {

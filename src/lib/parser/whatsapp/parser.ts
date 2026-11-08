@@ -50,10 +50,10 @@ const LABELS: LabelDef[] = [
   { key: 'tindakan', pattern: 'TINDAKAN', optionalColon: true },
   { key: 'rincian', pattern: 'RINCIAN\\s+KEGIATAN' },
   { key: 'armada', pattern: 'JUMLAH\\s+UNIT\\s+KENDARA(?:AN|KAN)(?:\\s+YANG\\s+DIGUNAKAN)?|JUMLAH\\s+(?:KENDARAAN|ARMADA)(?:\\s+YANG\\s+DIGUNAKAN)?' },
-  { key: 'personil', pattern: 'PERSONIL(?:\\s+YANG\\s+TERLIBAT)?' },
+  { key: 'personil', pattern: 'PERSONIL(?:\\s+YANG\\s+TERLIBAT)?', optionalColon: true },
   { key: 'penutup', pattern: 'Pelaksanaan\\s+kegiatan\\s+tersebut|Demikian\\s+yang', optionalColon: true },
   { key: 'dokumentasi', pattern: 'DOKUMENTASI(?:\\s+TERLAMPIR)?', optionalColon: true },
-  { key: 'melaporkan', pattern: 'YANG\\s+MELAPORKAN' },
+  { key: 'melaporkan', pattern: 'YANG\\s+MELAPORKAN', optionalColon: true },
   { key: 'tembusan', pattern: 'TEMBUSAN' },
 ];
 
@@ -217,9 +217,11 @@ export function parseReport(rawText: string): ParsedReport {
 
   // Yang melaporkan: "SARJUNO, S. Sos Komandan Regu C Satpol PP Ponorogo."
   const melaporkan = single(sec.melaporkan, true);
-  const cm = /^(.*?)\s*Komandan\s+Regu\s+([A-Za-z])\b/i.exec(melaporkan);
+  const cm = /^(.*?)\s*Komandan\s+Regu\s+([A-Za-z]\d*)\b/i.exec(melaporkan);
   const namaDanru = cm ? tidy(cm[1], true) : tidy(linesOf(sec.melaporkan, true)[0] || '', true);
+  const danruLabel = /\b(?:Ndanru|Danru)\s+([A-Z]\d*)\b/i.exec(`${melaporkan} ${plain}`)?.[1];
   const reguLetter = cm?.[2]
+    || danruLabel
     || /\bRegu\s+([A-Z])\b/.exec(`${single(sec.personil)} ${single(sec.rincian)}`)?.[1]
     || /\bRegu\s+([A-Z])\s+(?:Damkar|Satpol\s+PP)/i.exec(plain)?.[1]
     || '';

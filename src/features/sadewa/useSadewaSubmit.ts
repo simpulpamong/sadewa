@@ -70,7 +70,7 @@ export function useSadewaSubmit() {
     if (formatCache.current?.scope === scope && formatCache.current.checked) return formatCache.current.format;
     try {
       const { fetchConfigSWR } = await import('@/lib/configCache');
-      const r = await fetchConfigSWR();
+      const r = await fetchConfigSWR({ force: true });
       const sub = ((r as any)?.subcategories || []).find((s: any) => s.slug === scope || s.id === scope);
       const format = sub?.format && Array.isArray(sub.format.fields) && sub.format.fields.length ? (sub.format as DynamicFormatConfig) : null;
       formatCache.current = { scope, format, checked: true };
