@@ -17,7 +17,7 @@ export interface DynamicCategory {
 let cache: { at: number; categories: DynamicCategory[]; subcategories: DynamicSubcategory[] } | null = null;
 const TTL = 2_000; // near-realtime: perubahan ikon/foto/format dari admin cepat tercermin di sadewa
 
-function adminReady() { return Boolean(process.env.FIREBASE_SERVICE_ACCOUNT); }
+function adminReady() { return Boolean(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_SERVICE_ACCOUNT_JSON); }
 
 export async function loadDynamicConfig(opts?: { force?: boolean }) {
   if (!opts?.force && cache && Date.now() - cache.at < TTL) return cache;

@@ -107,6 +107,7 @@ setInterval(() => {
 function parseServiceAccount(rawInput: string) {
   let raw = String(rawInput || '').trim();
   if (!raw) throw new Error('FIREBASE_SERVICE_ACCOUNT kosong.');
+  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) raw = raw.slice(1, -1).trim();
   // support base64-encoded JSON env (common in some deploy setups)
   if (!raw.startsWith('{')) {
     try {
@@ -116,13 +117,16 @@ function parseServiceAccount(rawInput: string) {
   }
   let sa: any;
   try { sa = JSON.parse(raw); } catch {
-    // tolerate envs that store literal newlines/escaped sequences oddly
-    try { sa = JSON.parse(raw.replace(/\r\n/g, '\n')); } catch (e: any) {
+    // tolerate envs that store literal newlines/escaped sequences oddly or double-encoded
+    try {
+      const unwrapped = JSON.parse(raw.replace(/\r\n/g, '\n'));
+      sa = typeof unwrapped === 'string' ? JSON.parse(unwrapped) : unwrapped;
+    } catch (e: any) {
       throw new Error('FIREBASE_SERVICE_ACCOUNT bukan JSON valid.');
     }
   }
   if (sa?.private_key && typeof sa.private_key === 'string') {
-    sa.private_key = sa.private_key.replace(/\\n/g, '\n');
+    sa.private_key = sa.private_key.replace(/\\n/g, '\n').replace(/\r/g, '');
   }
   if (!sa?.project_id || !sa?.client_email || !sa?.private_key) {
     throw new Error('FIREBASE_SERVICE_ACCOUNT tidak lengkap (butuh project_id, client_email, private_key).');
@@ -131,11 +135,21 @@ function parseServiceAccount(rawInput: string) {
 }
 
 function getDb() {
-  const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
-  if (!raw) throw new Error('FIREBASE_SERVICE_ACCOUNT belum dikonfigurasi pada server.');
-  const sa = parseServiceAccount(raw);
-  const app = getApps()[0] || initializeApp({ credential: cert(sa) });
-  return getFirestore(app);
+  const existing = getApps()[0];
+  if (existing) return getFirestore(existing);
+  const candidates = [process.env.FIREBASE_SERVICE_ACCOUNT, process.env.FIREBASE_SERVICE_ACCOUNT_JSON]
+    .map(v => (typeof v === 'string' ? v.trim() : ''))
+    .filter(Boolean);
+  if (!candidates.length) throw new Error('FIREBASE_SERVICE_ACCOUNT atau FIREBASE_SERVICE_ACCOUNT_JSON belum dikonfigurasi pada server.');
+  let last: unknown;
+  for (const raw of candidates) {
+    try {
+      const sa = parseServiceAccount(raw);
+      const app = initializeApp({ credential: cert(sa) });
+      return getFirestore(app);
+    } catch (e) { last = e; }
+  }
+  throw last instanceof Error ? last : new Error('FIREBASE_SERVICE_ACCOUNT bukan JSON valid.');
 }
 
 async function callAppsScript(action: string, data: any = {}) {
